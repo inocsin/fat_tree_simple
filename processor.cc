@@ -29,8 +29,8 @@ class Processor : public cSimpleModule
 
     long numFlitSent;
     long numFlitReceived;
-    long numDropped;
-    long flitByHop; //用于计算链路利用率
+    //long numDropped;
+    //long flitByHop; //用于计算链路利用率
 
     cOutVector hopCountVector;
     cOutVector flitDelayTime;
@@ -73,10 +73,10 @@ void Processor::initialize()
     // Initialize variables
     numFlitSent = 0;
     numFlitReceived = 0;
-    numDropped = 0;
-    flitByHop = 0;
+    //numDropped = 0;
+    //flitByHop = 0;
 
-    hopCountVector.setName("HopCount");
+    hopCountVector.setName("hopCount");
     flitDelayTime.setName("flitDelayTime");
 
     selfMsgSendMsg = new cMessage("selfMsgSendMsg");//注意顺序，先发送buffer里面的msg，再产生新的msg，这样一个flit需要2个周期才会发出去
@@ -96,7 +96,7 @@ void Processor::handleMessage(cMessage *msg)
         //********************发送新数据的自定时消息********************
         if(msg == selfMsgSendMsg){
             //****************************转发flit**************************
-            if(OutBuffer[0] != nullptr){ //下一个节点有buffer接受此flit
+            if(OutBuffer[0] != nullptr){
                 FatTreeMsg* current_forward_msg = OutBuffer[0];
                 forwardMessage(current_forward_msg);
 
@@ -109,15 +109,15 @@ void Processor::handleMessage(cMessage *msg)
                 OutBuffer[ProcessorBufferDepth-1] = nullptr;
             }
 
-            scheduleAt(simTime()+CLK_CYCLE,selfMsgSendMsg);
+            scheduleAt(simTime() + ProcessorForwardGap * CLK_CYCLE, selfMsgSendMsg);
 
         }else if(msg == selfMsgGenMsg){
 
-            if(getIndex() == 0){ //processor产生msg的模式,需要改进
-            //if (true) {
+            //if(getIndex() == 0){ //processor产生msg的模式,需要改进
+            if (true) {
 
                 //**********************产生flit*****************************
-                for(int i = 0;i<ProcessorBufferDepth;i++){
+                for(int i = 0; i < ProcessorBufferDepth; i++){
                     if(OutBuffer[i] == nullptr){
                         FatTreeMsg *newmsg = generateMessage();
                         OutBuffer[i] = newmsg;
@@ -128,35 +128,32 @@ void Processor::handleMessage(cMessage *msg)
                 //**********************产生定时消息*****************************
                 //package之间的时间间隔为泊松分布或自相似分布，同一个package的flit之间间隔为CLK_CYCLE
 
-
 #if defined POISSON_DIST //泊松分布
                 double expTime = Poisson();
 
                 if (Verbose >= VERBOSE_DETAIL_DEBUG_MESSAGES) {
                     EV << "Poisson interval: "<<expTime<<"\n";
                 }
+                scheduleAt(simTime() + expTime, selfMsgGenMsg);
 
-                scheduleAt(simTime()+expTime,selfMsgGenMsg);
 #else //均匀分布
 
-                scheduleAt(simTime()+CLK_CYCLE,selfMsgGenMsg);
+                int gap = (int) 1.0 / UniformInjectionRate;
+                scheduleAt(simTime() + gap * CLK_CYCLE, selfMsgGenMsg);
 #endif
-
 
 
             }
 
         }
 
-
     }else{
         //************************非self message*********************
-
         //***********************收到FatTreeMsg消息*******************
         FatTreeMsg *ftmsg = check_and_cast<FatTreeMsg *>(msg);
 
         // Message arrived
-        int current_ppid=getIndex();
+        int current_ppid = getIndex();
         int hopcount = ftmsg->getHopCount();
         if (Verbose >= VERBOSE_DEBUG_MESSAGES) {
             EV << ">>>>>>>>>>Message {" << ftmsg << " } arrived after " << hopcount <<
@@ -165,7 +162,7 @@ void Processor::handleMessage(cMessage *msg)
 
         // update statistics.
         numFlitReceived++;
-        flitByHop += hopcount + 1; //包含最后一跳路由器到processor
+        //flitByHop += hopcount + 1; //包含最后一跳路由器到processor
 
         flitDelayTime.record(simTime().dbl() - ftmsg->getFlitGenTime());
         hopCountVector.record(hopcount);
@@ -179,14 +176,11 @@ void Processor::handleMessage(cMessage *msg)
 FatTreeMsg* Processor::generateMessage()
 {
 
-
     // Produce source and destination address
     int current_ppid = getIndex();
     int n = getVectorSize();//processor的数量
-    //EV<<n<<"\n";
 #ifdef UNIFORM //均匀分布
     int dst_ppid = intuniform(0, n-2); //均匀流量模型
-    //EV<<dst_ppid<<"\n";
     if (dst_ppid >= current_ppid)
         dst_ppid++;//保证不取到current_ppid
 #endif
@@ -195,17 +189,20 @@ FatTreeMsg* Processor::generateMessage()
     int dst_plid = ppid2plid(dst_ppid);
 
     char msgname[200];//初始分配的空间太小导致数据被改变!!!!!!!
-    sprintf(msgname, "Head Flit, From processor node %d(%d) to node %d(%d)", current_ppid,current_plid,dst_ppid,dst_plid);
+    sprintf(msgname, "Flit, From processor node %d(%d) to node %d(%d)", current_ppid,current_plid,dst_ppid,dst_plid);
 
     // Create message object and set source and destination field.
     FatTreeMsg *msg = new FatTreeMsg(msgname);
-    msg->setSrc_ppid(current_ppid);//设置发出的processor编号
-    msg->setDst_ppid(dst_ppid);//设置接收的processor编号
-    msg->setFrom_router_port(getNextRouterPortP());//设置收到该msg的Router端口
+    msg->setSrc_ppid(current_ppid); //设置发出的processor编号
+    msg->setDst_ppid(dst_ppid); //设置接收的processor编号
+    msg->setFrom_router_port(getNextRouterPortP()); //设置收到该msg的Router端口
     msg->setFlitGenTime(simTime().dbl());
 
+    if (Verbose >= VERBOSE_DEBUG_MESSAGES) {
+        EV << "<<<<<<<<<<Processor: "<<getIndex()<<"("<<ppid2plid(getIndex())<<") is generating flit>>>>>>>>>>\n";
+        EV << msg << endl;
+    }
     return msg;
-
 }
 
 //processor转发的路由算法,processor只有一个port,直接转发出去即可
@@ -215,7 +212,7 @@ void Processor::forwardMessage(FatTreeMsg *msg)
     msg->setFrom_router_port(getNextRouterPortP());// 设置收到该信息路由器的端口号
     send(msg,"port$o");
     if (Verbose >= VERBOSE_DEBUG_MESSAGES) {
-        EV << "Forwarding message { " << msg << " } from processor to router\n";
+        EV << "PROCESSOR: "<<getIndex()<<"("<<ppid2plid(getIndex())<<") << Forwarding message >> { " << msg << " } from processor to router\n";
     }
 
 }
@@ -223,33 +220,33 @@ void Processor::forwardMessage(FatTreeMsg *msg)
 int Processor::getNextRouterPortP(){
     int current_ppid=getIndex();
     int plid=ppid2plid(current_ppid);
-    int port=plid%10;
+    int port=plid%100;
     return port; //返回和processor相连的router的端口
 }
 
 
 //从ppid计算plid
 int Processor::ppid2plid(int ppid){
-    int idtmp=ppid;
-    int idfinal=0;
-    int mul=1;
-    for(int i=0;i<LevelNum-1;i++){
-        idfinal=idfinal+idtmp%(PortNum/2)*mul;
-        mul=mul*10;
-        idtmp=(int)(idtmp/(PortNum/2));
+    int idtmp = ppid;
+    int idfinal = 0;
+    int mul = 1;
+    for(int i = 0; i < LevelNum - 1; i++){
+        idfinal = idfinal + idtmp % (PortNum / 2)*mul;
+        mul = mul * 100;
+        idtmp = (int) (idtmp / (PortNum / 2));
     }
-    idfinal=idfinal+idtmp*mul;
+    idfinal = idfinal + idtmp * mul;
     return idfinal;
 }
 //从plid计算ppid
 int Processor::plid2ppid(int plid){
-    int tmp=plid;
-    int mul=1;
-    int IDtmp=0;
-    for(int i=0;i<LevelNum;i++){
-        IDtmp=IDtmp+mul*(tmp%10);
-        mul=mul*(PortNum/2);
-        tmp=tmp/10;
+    int tmp = plid;
+    int mul = 1;
+    int IDtmp = 0;
+    for(int i = 0; i < LevelNum; i++){
+        IDtmp = IDtmp + mul * (tmp % 100);
+        mul = mul * (PortNum / 2);
+        tmp = tmp / 100;
     }
     return IDtmp;
 }
@@ -257,6 +254,7 @@ int Processor::plid2ppid(int plid){
 
 
 double Processor::Poisson() {
+    //E(x) = 1 / lambda
     double exp_time = exponential((double)1/LAMBDA);
     exp_time = round(exp_time / TimeScale) * CLK_CYCLE;
     if(exp_time < CLK_CYCLE) {
@@ -270,25 +268,24 @@ void Processor::finish()
     // This function is called by OMNeT++ at the end of the simulation.
     EV << "Flit Sent: " << numFlitSent << endl;
     EV << "Flit Received: " << numFlitReceived << endl;
-    EV << "Dropped:  " << numDropped << endl;
+    //EV << "Dropped:  " << numDropped << endl;
 
 
-    recordScalar("#flit sent", numFlitSent);
-    recordScalar("#flit received", numFlitReceived);
-    recordScalar("#flit dropped", numDropped);
-    recordScalar("#flitByHop", flitByHop);
+    recordScalar("flitSent", numFlitSent);
+    recordScalar("flitReceived", numFlitReceived);
+    //recordScalar("#flit dropped", numDropped);
+    //recordScalar("#flitByHop", flitByHop);
 
 
     if(getIndex() == 0) {
-        double timeCount = simTime().dbl() - Sim_Start_Time;
-        recordScalar("#timeCount", timeCount);
+        double timeSpend = (simTime().dbl() - Sim_Start_Time);
+        double clockCycle = CLK_CYCLE;
+        double timeCount = (simTime().dbl() - Sim_Start_Time) / (CLK_CYCLE); //注意，文本替换
+
+        recordScalar("timeSpend", timeSpend);
+        recordScalar("timeCount", timeCount);
+        recordScalar("clockCycle", CLK_CYCLE);
     }
 
 }
-
-
-
-
-
-
 
