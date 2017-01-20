@@ -40,6 +40,8 @@ class Router : public cSimpleModule
     FatTreeMsg* InputBuffer[PortNum][RouterBufferDepth]; //输入缓冲
     FatTreeMsg* OutputBuffer[PortNum][RouterBufferDepth]; //输出缓冲
 
+    cOutVector inputBufferUtility;
+    cOutVector outputBufferUtility;
 
   public:
     Router();
@@ -59,6 +61,7 @@ class Router : public cSimpleModule
     virtual int swlid2swpid(int swlid);
     virtual int calRoutePort(FatTreeMsg *msg);
     virtual int getNextRouterPort(int current_out_port); //计算下一个相连的router的端口
+    virtual void recordBufferUtility();
 
     // The finish() function is called by OMNeT++ at the end of the simulation:
     virtual void finish() override;
@@ -92,6 +95,10 @@ void Router::initialize()
     selfMsgAlloc = new cMessage("selfMsgAlloc");
     scheduleAt(Sim_Start_Time, selfMsgAlloc);
 
+    inputBufferUtility.setName("inputBufferUtility");
+    outputBufferUtility.setName("outputBufferUtility");
+
+
 
 }
 
@@ -104,6 +111,7 @@ void Router::handleMessage(cMessage *msg)
             //******************仲裁定时****************************
             //仲裁间隔为RouterOverhead * CLK_CYCLE
             scheduleAt(simTime() + RouterOverhead * CLK_CYCLE, selfMsgAlloc);
+            recordBufferUtility();
             //对每个输入缓存最前面的数据进行转移到输出缓存
             for(int i = 0; i < PortNum; i++) {
                 if(InputBuffer[i][0] != nullptr) {
@@ -370,7 +378,31 @@ int Router::getNextRouterPort(int current_out_port){
     return k;
 }
 
-
+void Router::recordBufferUtility(){
+    int inputCount = 0, outputCount = 0;
+    for(int i = 0; i < PortNum; i++) {
+        for(int j = 0; j < RouterBufferDepth; j++) {
+            if(InputBuffer[i][j] != nullptr) {
+                inputCount++;
+            } else {
+                break;
+            }
+        }
+    }
+    float inputUtility = 1.0 * inputCount / PortNum / RouterBufferDepth;
+    inputBufferUtility.record(inputUtility);
+    for(int i = 0; i < PortNum; i++) {
+        for(int j = 0; j < RouterBufferDepth; j++) {
+            if(OutputBuffer[i][j] != nullptr) {
+                outputCount++;
+            } else {
+                break;
+            }
+        }
+    }
+    float outputUtility = 1.0 * outputCount / PortNum / RouterBufferDepth;
+    outputBufferUtility.record(outputUtility);
+}
 
 
 void Router::finish()
