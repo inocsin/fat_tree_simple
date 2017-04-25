@@ -3,11 +3,13 @@
  *
  *  Created on: 2017年1月16日
  *      Author: Vincent
+ *
  */
-
+// The fat_tree_simple use the parameter of Dawn-5000
+// The Dawn-5000 has following parameter:
+// 16-port switch, 3 layer fat-tree, total 1024 compute nodes
 #ifndef FAT_TREE_H_
 #define FAT_TREE_H_
-
 
 //网络拓扑参数
 #define PortNum 16
